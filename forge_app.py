@@ -11,7 +11,6 @@ from threading import Thread
 SYSTEM_PROMPT = """You are a helpful assistant."""
 device = "cuda" if torch.cuda.is_available() else "cpu"
 TITLE = "<h1><center>SmallThinker-3B Chat</center></h1>"
-MODEL_PATH = "PowerInfer/SmallThinker-3B-Preview"
 
 # Custom CSS with dark theme
 CSS = """
@@ -47,15 +46,12 @@ button {
 }
 """
 
-# Load model and tokenizer
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_PATH,
-    torch_dtype=torch.float16,
-).to(device)
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-
+model = None
+tokenizer = None
+lastModel = None
 
 def stream_chat(
+    MODEL_PATH: str,
     message: str,
     history: list,
     temperature: float = 0.3,
@@ -77,7 +73,19 @@ def stream_chat(
         ])
     
     conversation.append({"role": "user", "content": message})
-    
+
+    global model, tokenizer, lastModel
+    if lastModel != MODEL_PATH:
+        model = None
+        tokenizer = None
+    if model is None:
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_PATH,
+            torch_dtype=torch.float16,
+        ).to(device)
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+        lastModel = MODEL_PATH
+
     input_text = tokenizer.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer.encode(input_text, return_tensors="pt").to(device)
     streamer = TextIteratorStreamer(tokenizer, timeout=40.0, skip_prompt=True, skip_special_tokens=True)
@@ -123,7 +131,7 @@ def unload():
     global model, tokenizer
     del model, tokenizer
 
-with gr.Blocks(css=CSS, theme="soft") as demo:
+with gr.Blocks(css=CSS, theme="soft", analytics_enabled=False) as demo:
     gr.HTML(TITLE)
     
     chatbot = gr.Chatbot(
@@ -145,7 +153,8 @@ with gr.Blocks(css=CSS, theme="soft") as demo:
         top_p = gr.Slider(minimum=0.0, maximum=1.0, step=0.1, value=0.8, label="Top-p")
         top_k = gr.Slider(minimum=1, maximum=100, step=1, value=20, label="Top-k")
         repetition_penalty = gr.Slider(minimum=1.0, maximum=2.0, step=0.1, value=1.1, label="Repetition penalty")
-
+        model = gr.Radio(choices=["PowerInfer/SmallThinker-3B-Preview", "huihui-ai/SmallThinker-3B-Preview-abliterated"], value="huihui-ai/SmallThinker-3B-Preview-abliterated", label="Use safe model, or unrestricted [default]")
+        
     # Chain of events for submit button
     submit_event = submit.click(
         fn=add_message,
@@ -158,7 +167,7 @@ with gr.Blocks(css=CSS, theme="soft") as demo:
         queue=False
     ).then(
         fn=stream_chat,
-        inputs=[textbox, chatbot, temperature, max_new_tokens, top_p, top_k, repetition_penalty],
+        inputs=[model, textbox, chatbot, temperature, max_new_tokens, top_p, top_k, repetition_penalty],
         outputs=chatbot,
         show_progress=True
     )
@@ -175,7 +184,7 @@ with gr.Blocks(css=CSS, theme="soft") as demo:
         queue=False
     ).then(
         fn=stream_chat,
-        inputs=[textbox, chatbot, temperature, max_new_tokens, top_p, top_k, repetition_penalty],
+        inputs=[model, textbox, chatbot, temperature, max_new_tokens, top_p, top_k, repetition_penalty],
         outputs=chatbot,
         show_progress=True
     )
